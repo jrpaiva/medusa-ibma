@@ -1,23 +1,40 @@
-const CACHE_NAME = 'medusa-mesa-cache-v2';
-const OFFLINE_URL = './offline.html';
+const CACHE_NAME = 'medusa-mesa-cache-v1';
 
+// ATENÇÃO: Verifique os caminhos reais dos seus arquivos
 const urlsToCache = [
-  './',
-  './index.html',
-  './offline.html',  // Nova página offline
-  './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './css/styles.css',
-  './js/app.js',
-  'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap'
+  '/',  // Página principal
+  '/index.html',
+  '/manifest.json',
+  // Verifique se o ícone existe neste caminho:
+  '/icon-192.png',  // ou './icon-192.png'
+  // Remova temporariamente fontes externas para testar:
+  // 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap'
 ];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
-      .then(() => self.skipWaiting())  // Ativa imediatamente
+      .then(cache => {
+        console.log('Cache aberto. Tentando adicionar arquivos...');
+        
+        // Método 1: Adiciona um por um com tratamento de erro
+        const cachePromises = urlsToCache.map(url => {
+          return cache.add(url).catch(error => {
+            console.error(`❌ Erro ao cachear ${url}:`, error);
+            // Não rejeita a promise principal, só loga o erro
+            return Promise.resolve();
+          });
+        });
+        
+        return Promise.all(cachePromises);
+      })
+      .then(() => {
+        console.log('✅ Todos os arquivos processados (alguns podem ter falhado)');
+        return self.skipWaiting(); // Ativa o SW imediatamente
+      })
+      .catch(error => {
+        console.error('❌ Erro crítico na instalação:', error);
+      })
   );
 });
 
@@ -29,78 +46,61 @@ self.addEventListener('activate', event => {
         return Promise.all(
           cacheNames.map(cacheName => {
             if (cacheName !== CACHE_NAME) {
+              console.log('🗑️ Removendo cache antigo:', cacheName);
               return caches.delete(cacheName);
             }
           })
         );
       }),
-      // Assume controle imediato
+      // Assume controle imediato de todas as páginas
       self.clients.claim()
     ])
   );
 });
 
 self.addEventListener('fetch', event => {
-  // Ignora requisições não-GET e chrome-extension
-  if (event.request.method !== 'GET' || 
-      event.request.url.startsWith('chrome-extension://')) {
-    return;
-  }
-
+  // Ignora requisições POST ou de outras origens
+  if (event.request.method !== 'GET') return;
+  
   event.respondWith(
     caches.match(event.request)
       .then(cachedResponse => {
-        // Sempre busca na rede para atualizar cache
-        const networkFetch = fetch(event.request)
-          .then(response => {
-            // Atualiza cache com nova versão
-            if (response.ok) {
-              const responseClone = response.clone();
+        // Tenta buscar na rede primeiro (Stale-While-Revalidate)
+        const fetchPromise = fetch(event.request)
+          .then(networkResponse => {
+            // Atualiza cache com nova resposta
+            if (networkResponse.ok) {
+              const responseToCache = networkResponse.clone();
               caches.open(CACHE_NAME)
-                .then(cache => cache.put(event.request, responseClone));
+                .then(cache => cache.put(event.request, responseToCache));
             }
-            return response;
+            return networkResponse;
           })
-          .catch(() => {
-            // Fallback inteligente baseado no tipo
+          .catch(error => {
+            console.log('🌐 Offline ou erro de rede:', error);
+            
+            // Se temos cache, retorna do cache
+            if (cachedResponse) {
+              return cachedResponse;
+            }
+            
+            // Para navegação, retorna página offline
             if (event.request.mode === 'navigate') {
-              return caches.match(OFFLINE_URL);
+              return caches.match('/index.html');
             }
             
-            if (event.request.destination === 'image') {
-              return caches.match('./images/offline-image.png');
-            }
-            
-            return cachedResponse || new Response('Offline', {
+            // Para outros casos, retorna erro 503
+            return new Response('Conteúdo offline não disponível', {
               status: 503,
-              headers: { 'Content-Type': 'text/plain' }
+              statusText: 'Service Unavailable',
+              headers: new Headers({
+                'Content-Type': 'text/plain'
+              })
             });
           });
-
-        // Retorna cache imediatamente se existir, mas atualiza em background
-        return cachedResponse || networkFetch;
+        
+        // Retorna cache imediatamente se disponível
+        return cachedResponse || fetchPromise;
       })
-  );
-});
-
-// Notificações Push (opcional)
-self.addEventListener('push', event => {
-  const options = {
-    body: event.data.text(),
-    icon: './icon-192.png',
-    badge: './icon-192.png',
-    vibrate: [100, 50, 100],
-    data: { url: './' }
-  };
-  
-  event.waitUntil(
-    self.registration.showNotification('Medusa App', options)
-  );
-});
-
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  event.waitUntil(
-    clients.openWindow(event.notification.data.url)
   );
 });
