@@ -1,0 +1,17 @@
+{
+  "name": "Medusa e Mesa Dinâmica",
+  "short_name": "MedusaApp",
+  "description": "Mapeamento de canais da Medusa e Mesa de Som.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f0f2f5",
+  "theme_color": "#d1d5db",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
